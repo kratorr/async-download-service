@@ -5,42 +5,40 @@ import aiofiles
 import asyncio
 import argparse
 
-
-PHOTOS_PATH = os.getenv('DEFAULT_PHOTOS_DIR', default='test_photos')
-DELAY = os.getenv('DEFAULT_DELAY', default=0)
-CHUNK_SIZE = os.getenv('DEFAULT_CHUNK_SIZE', default=100000)
-
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
+
+CHUNK_SIZE=100000
 
 logging.basicConfig(format='%(levelname)-8s [%(asctime)s] %(message)s', level=logging.DEBUG)
 
+parser = argparse.ArgumentParser(description='Microservice for download photo archive ')
 
-parser = argparse.ArgumentParser(description='Download photo archive microservice')
 parser.add_argument('--logging',
                     action='store_true',
-                    default=True,
+                    default=os.getenv('LOGGING', default=True),
                     help='enable logging; default=True'
                     )
 parser.add_argument('--photos_dir',
                     type=str,
-                    default=PHOTOS_PATH,
+                    default=os.getenv('PHOTOS_DIR', default=BASE_DIR + '/test_photos/'),
                     help='',
                     )
 parser.add_argument('--delay',
                     type=int,
-                    default=DELAY,
+                    default=os.getenv('DELAY', default=0),
                     help='delay for downloading; default=0',
                     )
 
 
 async def get_archive_process(path_source_dir):
-    if not os.path.exists(BASE_DIR + '/test_photos/' + path_source_dir):
+    print(os.path.join(args.photos_dir, path_source_dir))
+    if not os.path.exists(os.path.join(args.photos_dir, path_source_dir)):
         return None
     cmd = ['zip', '-r', '-',  path_source_dir]
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
-        cwd="./test_photos",
+        cwd=args.photos_dir,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
     )
@@ -63,7 +61,7 @@ async def archivate(request):
 
     try:
         while True:
-            data = await archive_proccess.stdout.read(500000)
+            data = await archive_proccess.stdout.read(CHUNK_SIZE)
             if data:
                 logging.info(f'Sending archive chunk {chunk_number} {archive_proccess.pid}')
                 await response.write(data)
@@ -71,6 +69,7 @@ async def archivate(request):
                 logging.info(f'Archivate stopped {archive_proccess.pid}')
                 break
             chunk_number += 1
+            await asyncio.sleep(args.delay)
 
     except (asyncio.CancelledError, KeyboardInterrupt):
         logging.info('Download was interrupted')
@@ -84,7 +83,7 @@ async def archivate(request):
 
 
 async def handle_index_page(request):
-    print(args)
+    print(args.photos_dir)
     async with aiofiles.open('index.html', mode='r') as index_file:
         index_contents = await index_file.read()
     return web.Response(text=index_contents, content_type='text/html')
@@ -94,6 +93,8 @@ async def handle_index_page(request):
 if __name__ == '__main__':
     app = web.Application()
     args = parser.parse_args()
+    print(args)
+
     app.add_routes([
         web.get('/', handle_index_page),
         web.get('/archive/{archive_hash}/', archivate),
