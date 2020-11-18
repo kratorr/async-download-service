@@ -5,10 +5,13 @@ import aiofiles
 import asyncio
 import argparse
 
+import itertools
+
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 
 CHUNK_SIZE = 100000
 
+logger = logging.getLogger(__file__)
 
 parser = argparse.ArgumentParser(description='Microservice for download photo archive ')
 
@@ -31,15 +34,6 @@ parser.add_argument('--delay',
                     help='delay for downloading; default=0',
                     )
 
-args = parser.parse_args()
-
-if args.logging:
-    level = logging.DEBUG
-else:
-    level = logging.CRITICAL
-
-logging.basicConfig(format='%(levelname)-8s [%(asctime)s] %(message)s', level=level)
-
 
 async def get_archive_process(path_source_dir):
     if not os.path.exists(os.path.join(args.photos_dir, path_source_dir)):
@@ -57,6 +51,9 @@ async def get_archive_process(path_source_dir):
 
 async def archivate(request):
     file_name = request.match_info.get('archive_hash')
+    if not file_name:
+        raise web.HTTPBadRequest()
+
     archive_proccess = await get_archive_process(file_name)
     if not archive_proccess:
         raise web.HTTPNotFound(text='Архив не существует или был удален')
@@ -67,22 +64,20 @@ async def archivate(request):
     response.headers['CONTENT-DISPOSITION'] = f'attachment; filename={file_name}.zip'
     await response.prepare(request)
 
-    chunk_number = 1
-
     try:
-        while True:
+        for chunk_number in itertools.count(1):
             data = await archive_proccess.stdout.read(CHUNK_SIZE)
             if data:
-                logging.debug(f'Sending archive chunk {chunk_number} {archive_proccess.pid}')
+                logger.debug(f'Sending archive chunk {chunk_number} {archive_proccess.pid}')
                 await response.write(data)
             else:
-                logging.debug(f'Archivate stopped {archive_proccess.pid}')
+                logger.debug(f'Archivate stopped {archive_proccess.pid}')
                 break
-            chunk_number += 1
+
             await asyncio.sleep(args.delay)
 
     except (asyncio.CancelledError, KeyboardInterrupt):
-        logging.debug('Download was interrupted')
+        logger.debug('Download was interrupted')
         raise
     finally:
         if archive_proccess.returncode is None:
@@ -99,8 +94,15 @@ async def handle_index_page(request):
 
 
 if __name__ == '__main__':
-    app = web.Application()
+    args = parser.parse_args()
+    if args.logging:
+        level = logging.DEBUG
+    else:
+        level = logging.CRITICAL
 
+    logging.basicConfig(format='%(levelname)-8s [%(asctime)s] %(message)s', level=level)
+
+    app = web.Application()
     app.add_routes([
         web.get('/', handle_index_page),
         web.get('/archive/{archive_hash}/', archivate),
