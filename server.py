@@ -4,8 +4,9 @@ from aiohttp import web
 import aiofiles
 import asyncio
 import argparse
-
 import itertools
+from functools import partial
+
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 
@@ -35,26 +36,28 @@ parser.add_argument('--delay',
                     )
 
 
-async def get_archive_process(path_source_dir):
-    if not os.path.exists(os.path.join(args.photos_dir, path_source_dir)):
+async def get_archive_process(file_name, photos_dir):
+
+    if not os.path.exists(os.path.join(photos_dir, file_name)):
         return None
-    cmd = ['zip', '-r', '-',  path_source_dir]
+    cmd = ['zip', '-r', '-',  file_name]
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
-        cwd=args.photos_dir,
+        cwd=photos_dir,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
     )
     return proc
 
 
-async def archivate(request):
+async def archivate(photos_dir, delay, request):
     file_name = request.match_info.get('archive_hash')
+    
     if not file_name:
         raise web.HTTPBadRequest()
 
-    archive_proccess = await get_archive_process(file_name)
+    archive_proccess = await get_archive_process(file_name, photos_dir)
     if not archive_proccess:
         raise web.HTTPNotFound(text='Архив не существует или был удален')
 
@@ -74,7 +77,7 @@ async def archivate(request):
                 logger.debug(f'Archivate stopped {archive_proccess.pid}')
                 break
 
-            await asyncio.sleep(args.delay)
+            await asyncio.sleep(delay)
 
     except (asyncio.CancelledError, KeyboardInterrupt):
         logger.debug('Download was interrupted')
@@ -100,12 +103,17 @@ if __name__ == '__main__':
     else:
         level = logging.CRITICAL
 
+    photos_dir, delay,  = args.photos_dir, args.delay
+
     logging.basicConfig(format='%(levelname)-8s [%(asctime)s] %(message)s', level=level)
+
+    archivate_with_params = partial(archivate, photos_dir, delay)
+
 
     app = web.Application()
     app.add_routes([
         web.get('/', handle_index_page),
-        web.get('/archive/{archive_hash}/', archivate),
+        web.get('/archive/{archive_hash}/', archivate_with_params),
     ])
 
     web.run_app(app)
