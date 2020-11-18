@@ -57,8 +57,8 @@ async def archivate(photos_dir, delay, request):
     if not file_name:
         raise web.HTTPBadRequest()
 
-    archive_proccess = await get_archive_process(file_name, photos_dir)
-    if not archive_proccess:
+    archive_process = await get_archive_process(file_name, photos_dir)
+    if not archive_process:
         raise web.HTTPNotFound(text='Архив не существует или был удален')
 
     response = web.StreamResponse()
@@ -69,12 +69,12 @@ async def archivate(photos_dir, delay, request):
 
     try:
         for chunk_number in itertools.count(1):
-            data = await archive_proccess.stdout.read(CHUNK_SIZE)
+            data = await archive_process.stdout.read(CHUNK_SIZE)
             if data:
-                logger.debug(f'Sending archive chunk {chunk_number} {archive_proccess.pid}')
+                logger.debug(f'Sending archive chunk {chunk_number} {archive_process.pid}')
                 await response.write(data)
             else:
-                logger.debug(f'Archivate stopped {archive_proccess.pid}')
+                logger.debug(f'Archivate stopped {archive_process.pid}')
                 break
 
             await asyncio.sleep(delay)
@@ -83,9 +83,9 @@ async def archivate(photos_dir, delay, request):
         logger.debug('Download was interrupted')
         raise
     finally:
-        if archive_proccess.returncode is None:
-            archive_proccess.kill()
-            await archive_proccess.communicate()
+        if archive_process.returncode is None:
+            archive_process.kill()
+            await archive_process.communicate()
         response.force_close()
     return response
 
@@ -108,7 +108,6 @@ if __name__ == '__main__':
     logging.basicConfig(format='%(levelname)-8s [%(asctime)s] %(message)s', level=level)
 
     archivate_with_params = partial(archivate, photos_dir, delay)
-
 
     app = web.Application()
     app.add_routes([
